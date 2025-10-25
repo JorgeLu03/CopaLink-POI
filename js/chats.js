@@ -1,20 +1,26 @@
 // js/chats.js — Parte 1/5
 document.addEventListener('DOMContentLoaded', () => {
+  let currentUser = null; // Guardaremos el usuario autenticado aquí
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // Selectores para el menú de usuario (datos dinámicos)
+  const menuUserName = document.getElementById('menuUserName');
+  const menuUserGems = document.getElementById('menuUserGems');
   /* =========================
      Datos de ejemplo
   ========================== */
-  const conversations = {
+  const conversations = { // Estos son chats de demo, los grupos usarán Firestore para mensajes
     ana: [
       { me:false, text:"¿Listos para mañana?", time:"10:10 p.m." },
       { me:true,  text:"¡Sí! Paso por ti a las 7", time:"10:11 p.m." },
       { me:false, text:"Perfecto ✌️", time:"10:12 p.m." },
     ],
-    grupo: [
-      // En grupos, para mensajes de otros: user y gems
-      { me:false, user:"Alex",  gems: 123, text:"Nos juntamos hoy o qué?", time:"9:40 p.m." },
-      { me:true,                       text:"Yo llego tipo 8:30",       time:"9:41 p.m." },
-      { me:false, user:"Diego", gems: 345, text:"Va, llevo snacks 🥤",    time:"9:42 p.m." },
-    ],
+    // grupo: [ // Este grupo de ejemplo se eliminará o se convertirá en un chat de Firestore
+    //   { me:false, user:"Alex",  gems: 123, text:"Nos juntamos hoy o qué?", time:"9:40 p.m." },
+    //   { me:true,                       text:"Yo llego tipo 8:30",       time:"9:41 p.m." },
+    //   { me:false, user:"Diego", gems: 345, text:"Va, llevo snacks 🥤",    time:"9:42 p.m." },
+    // ],
     diego: [
       { me:false, text:"Bro, el parley está listo", time:"9:10 p.m." },
       { me:true,  text:"Buenísimo. Pásalo al grupo", time:"9:11 p.m." },
@@ -24,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
   /* =========================
      Selectores comunes
   ========================== */
-  const listItems   = document.querySelectorAll('.chatitem');
+  const chatListContainer = document.getElementById('chatListContainer');
   const promo       = document.getElementById('placeholderPromo');
   const convo       = document.getElementById('conversation');
   const convName    = document.getElementById('convName');
@@ -92,70 +98,121 @@ document.addEventListener('DOMContentLoaded', () => {
   // Estado
   let currentChatId   = null;
   let currentChatType = 'private';
+  let unsubscribeMessages = null; // Para desuscribirse de los mensajes del chat actual
 
   // Estado demo por chat (tareas por grupo)
   const tasksByChat = {
-    grupo: [
-      { id: 1, text: "Definir ranking de poder (48 equipos)", done:false },
-      { id: 2, text: "Diseñar pantallas en Figma", done:false },
-      { id: 3, text: "Documentar reglas del simulador", done:false },
-      { id: 4, text: "Subir maquetado al repositorio", done:false },
-    ]
+    // grupo: [ // Este grupo de ejemplo se eliminará o se convertirá en un chat de Firestore
+    //   { id: 1, text: "Definir ranking de poder (48 equipos)", done:false },
+    //   { id: 2, text: "Diseñar pantallas en Figma", done:false },
+    //   { id: 3, text: "Documentar reglas del simulador", done:false },
+    //   { id: 4, text: "Subir maquetado al repositorio", done:false },
+    // ]
   };
-  const addedMembers = []; // pila de añadidos (demo)
 
   /* =========================
      Cargar grupos creados (localStorage)
   ========================== */
-  (function loadUserCreatedData(){
-    try {
-      const extraGroups = JSON.parse(localStorage.getItem('created_groups') || '[]');
-      const extraConvs  = JSON.parse(localStorage.getItem('created_conversations') || '{}');
-      const chatlist    = document.querySelector('.chatlist');
 
-      // Mergear conversaciones
-      Object.keys(extraConvs).forEach(k => {
-        if (!conversations[k]) conversations[k] = extraConvs[k];
-      });
+  /* ==================================================
+     CONTROL DE AUTENTICACIÓN Y CARGA DE DATOS
+  =================================================== */
+  auth.onAuthStateChanged(async (user) => {
+    if (user) {
+      // --- El usuario SÍ está autenticado ---
+      currentUser = user; // Guardamos el usuario actual
+      console.log('Usuario autenticado:', user.displayName);
+      
+      // 1. Mostrar su nombre de perfil
+      if (menuUserName) {
+        menuUserName.textContent = user.displayName || 'Usuario';
+      }
 
-      // Pinta grupos nuevos en sidebar
-      extraGroups.forEach(g => {
-        if (chatlist.querySelector(`[data-chat="${g.id}"]`)) return;
-        const a = document.createElement('a');
-        a.className = 'chatitem';
-        a.href = '#';
-        a.dataset.chat = g.id;
-        a.dataset.name = g.name;
-        a.dataset.type = 'group';
-        a.innerHTML = `
-          <div class="avatar grp">👥</div>
-          <div class="meta">
-            <div class="row1"><span class="name">${g.name}</span><time></time></div>
-            <div class="row2"><span class="preview">Nuevo grupo creado</span></div>
-          </div>`;
-        chatlist.appendChild(a);
-        a.addEventListener('click', (e) => {
-          e.preventDefault();
-          document.querySelectorAll('.chatitem.active').forEach(el => el.classList.remove('active'));
-          a.classList.add('active');
-          openConversation(g.id, g.name, 'group');
+      // 2. Obtener y mostrar sus gemas desde Firestore
+      try {
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          if (menuUserGems) {
+            menuUserGems.textContent = userData.gems || 0;
+          }
+        } else {
+          console.warn('El documento del usuario no existe en Firestore.');
+          if (menuUserGems) menuUserGems.textContent = 0;
+        }
+      } catch (error) {
+        console.error("Error al obtener datos del usuario:", error);
+        if (menuUserGems) menuUserGems.textContent = 'Error';
+      }
+
+      // 3. Activar el botón de cerrar sesión
+      btnLogoutMenu?.addEventListener('click', () => {
+        closeUserMenu();
+        openConfirm('¿Deseas cerrar sesión?', async () => {
+          await auth.signOut();
+          // La redirección se hará automáticamente por el listener de abajo
         });
       });
 
-      // Abrir automáticamente el último creado
-      const openId = localStorage.getItem('open_group_id');
-      if (openId) {
-        const item = chatlist.querySelector(`[data-chat="${openId}"]`);
-        if (item) {
-          item.classList.add('active');
-          openConversation(openId, item.dataset.name, 'group');
-        }
-        localStorage.removeItem('open_group_id');
-      }
-    } catch(e){
-      console.warn('No pude cargar grupos creados:', e);
+      // 4. Empezar a escuchar los chats del usuario
+      listenForUserChats(user);
+
+    } else {
+      // --- El usuario NO está autenticado ---
+      console.log('Usuario no autenticado, redirigiendo a login...');
+      window.location.href = 'login.html';
     }
-  })();
+  });
+
+  /* ==================================================
+     CARGA DE CHATS DESDE FIRESTORE
+  =================================================== */
+  function listenForUserChats(user) {
+    // Escuchamos en tiempo real los chats donde el usuario es miembro
+    db.collection('chats')
+      .where('Members', 'array-contains', user.uid)
+      .onSnapshot(snapshot => {
+        const chats = [];
+        snapshot.forEach(doc => {
+          chats.push({ id: doc.id, ...doc.data() });
+        });
+        renderChatList(chats);
+      }, error => {
+        console.error("Error al cargar los chats:", error);
+        chatListContainer.innerHTML = '<div class="p-3 text-danger">Error al cargar chats.</div>';
+      });
+  }
+
+  function renderChatList(chats) {
+    if (!chatListContainer) return;
+    if (chats.length === 0) {
+      chatListContainer.innerHTML = '<div class="p-3 text-muted">No tienes chats aún. ¡Crea un grupo para empezar!</div>';
+      return;
+    }
+
+    chatListContainer.innerHTML = ''; // Limpiamos la lista
+    chats.forEach(chat => {
+      const a = document.createElement('a');
+      a.className = 'chatitem';
+      a.href = '#';
+      a.dataset.chat = chat.id;
+      a.dataset.name = chat.name;
+      a.dataset.type = chat.type;
+
+      const avatarContent = chat.type === 'group' ? '👥' : (chat.name || 'C').charAt(0).toUpperCase();
+      const avatarClass = chat.type === 'group' ? 'avatar grp' : 'avatar';
+
+      a.innerHTML = `
+        <div class="${avatarClass}">${avatarContent}</div>
+        <div class="meta">
+          <div class="row1"><span class="name">${chat.name}</span><time>${chat.lastMessage?.time || ''}</time></div>
+          <div class="row2"><span class="preview">${chat.lastMessage?.text || 'Chat iniciado'}</span></div>
+        </div>`;
+      
+      a.addEventListener('click', (e) => handleChatItemClick(e, a));
+      chatListContainer.appendChild(a);
+    });
+  }
 
     /* =========================
      Helpers de UI
@@ -180,14 +237,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     last.forEach(m => {
       const wrap = document.createElement('div');
-      wrap.className = 'msg ' + (m.me ? 'msg-me' : 'msg-peer');
+      wrap.className = 'msg ' + (m.senderId === currentUser.uid ? 'msg-me' : 'msg-peer'); // Usar senderId para 'me'
 
       let inner = '';
 
       // Si es grupo y el mensaje NO es mío: mostrar nombre + gemas
-      if (currentChatType === 'group' && !m.me) {
-        const gems = (typeof m.gems === 'number') ? m.gems : 0;
-        const name = m.user || 'Miembro';
+      if (currentChatType === 'group' && m.senderId !== currentUser.uid) {
+        const gems = (typeof m.gems === 'number') ? m.gems : 0; // Asumiendo que 'gems' viene con el mensaje o se busca
+        const name = m.senderName || 'Miembro'; // Asumiendo 'senderName' viene con el mensaje
         inner += `
           <div class="msg-head" style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
             <strong>${name}</strong>
@@ -199,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
       }
 
-      inner += `${m.text}<span class="time">${m.time || ''}</span>`;
+      inner += `${m.text}<span class="time">${m.time || ''}</span>`; // 'time' debería venir del timestamp de Firestore
       wrap.innerHTML = inner;
       convBody.appendChild(wrap);
     });
@@ -225,8 +282,6 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (mode === 'add'){
       spTitle.textContent = 'Agregar integrante';
       spAddBody.hidden = false;
-      addInput?.focus();
-      renderAdded();
     } else if (mode === 'email'){
       spTitle.textContent = 'Enviar Correo';
       spEmailBody.hidden = false;
@@ -254,17 +309,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function renderAdded(){
-    addedList.innerHTML = '';
-    addedMembers.forEach((m, idx) => {
-      const div = document.createElement('div');
-      div.className = 'sp-task';
-      div.innerHTML = `<div style="grid-column:1 / span 2;">${idx+1}. ${m}</div>`;
-      addedList.appendChild(div);
-    });
-  }
-
   function openConversation(chatId, name, type){
+    if (unsubscribeMessages) {
+      unsubscribeMessages(); // Desuscribirse del chat anterior
+    }
+
     currentChatId   = chatId;
     currentChatType = type || 'private';
 
@@ -304,7 +353,33 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    renderMessages(conversations[chatId] || []);
+    // Cargar mensajes del chat
+    // Si es un chat de demo (ej. 'ana', 'diego'), usa los datos locales
+    if (conversations[chatId]) {
+      renderMessages(conversations[chatId]);
+    } else {
+      // Si es un chat de Firestore (ej. un grupo creado), escucha los mensajes de Firestore
+      unsubscribeMessages = db.collection('chats').doc(chatId).collection('messages')
+        .orderBy('timestamp')
+        .onSnapshot(snapshot => {
+          const messages = [];
+          snapshot.forEach(doc => {
+            const data = doc.data();
+            messages.push({
+              id: doc.id,
+              senderId: data.senderId,
+              senderName: data.senderName,
+              text: data.text,
+              timestamp: data.timestamp,
+              time: data.timestamp ? new Date(data.timestamp.toDate()).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : ''
+            });
+          });
+          renderMessages(messages);
+        }, error => {
+          console.error("Error al cargar mensajes del chat:", error);
+          convBody.innerHTML = '<div class="p-3 text-danger">Error al cargar mensajes.</div>';
+        });
+    }
     msgInput.focus();
   }
 
@@ -313,35 +388,62 @@ document.addEventListener('DOMContentLoaded', () => {
     promo.hidden = false;
     document.querySelectorAll('.chatitem.active').forEach(el => el.classList.remove('active'));
     currentChatId = null;
+    if (unsubscribeMessages) {
+      unsubscribeMessages(); // Desuscribirse de los mensajes al cerrar el chat
+      unsubscribeMessages = null;
+    }
   }
 
     /* =========================
      Listeners: lista de chats
-  ========================== */
-  listItems.forEach(item => {
-    item.addEventListener('click', (e) => {
-      e.preventDefault();
-      document.querySelectorAll('.chatitem.active').forEach(el => el.classList.remove('active'));
-      item.classList.add('active');
+  ========================== */  
+  function handleChatItemClick(event, itemElement) {
+    event.preventDefault();
+    document.querySelectorAll('.chatitem.active').forEach(el => el.classList.remove('active'));
+    itemElement.classList.add('active');
 
-      const id   = item.dataset.chat;
-      const name = item.dataset.name || 'Chat';
-      const type = item.dataset.type || 'private';
-      openConversation(id, name, type);
-    });
-  });
+    const id   = itemElement.dataset.chat;
+    const name = itemElement.dataset.name || 'Chat';
+    const type = itemElement.dataset.type || 'private';
+    openConversation(id, name, type);
+  }
 
   /* =========================
      Composer
   ========================== */
-  function sendMessage(){
+  async function sendMessage(){
     const text = msgInput.value.trim();
-    if (!text || !currentChatId) return;
+    if (!text || !currentChatId || !currentUser) return;
 
-    const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    conversations[currentChatId] = conversations[currentChatId] || [];
-    conversations[currentChatId].push({ me:true, text, time });
-    renderMessages(conversations[currentChatId]);
+    // Si es un chat de demo, usa la lógica local
+    if (conversations[currentChatId]) {
+      const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+      conversations[currentChatId].push({ me:true, text, time });
+      renderMessages(conversations[currentChatId]);
+    } else {
+      // Si es un chat de Firestore, envía el mensaje a Firestore
+      try {
+        await db.collection('chats').doc(currentChatId).collection('messages').add({
+          senderId: currentUser.uid,
+          senderName: currentUser.displayName || 'Usuario',
+          text: text,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Actualizar el lastMessage del chat principal
+        await db.collection('chats').doc(currentChatId).update({
+          lastMessage: {
+            text: text,
+            time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+            senderId: currentUser.uid
+          }
+        });
+
+      } catch (error) {
+        console.error("Error al enviar mensaje:", error);
+        alert('No se pudo enviar el mensaje.');
+      }
+    }
 
     msgInput.value = '';
     msgInput.focus();
@@ -470,13 +572,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  btnLogoutMenu?.addEventListener('click', () => {
-    closeUserMenu();
-    openConfirm('¿Deseas cerrar sesión?', () => {
-      window.location.href = 'index.html';
-    });
-  });
-
   /* =========================
      Adjuntos (+): menú Documento / Foto
   ========================== */
@@ -507,35 +602,104 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Nueva opción: Ubicación
-  attachLocation?.addEventListener('click', () => {
+  attachLocation?.addEventListener('click', async () => { // Make async
     attachMenu.setAttribute('hidden','');
-    const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+    if (!currentChatId || !currentUser) return;
+
     const locationUrl = 'https://www.google.com/maps/place/Apodaca,+N.L./@25.7959952,-100.2709194,12z';
     const messageText = `📍 Ubicación: [Apodaca, N.L.](${locationUrl})`;
-    conversations[currentChatId] = conversations[currentChatId] || [];
-    conversations[currentChatId].push({ me:true, text: messageText, time });
-    renderMessages(conversations[currentChatId]);
+
+    // If it's a demo chat, use local logic
+    if (conversations[currentChatId]) {
+      const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+      conversations[currentChatId].push({ me:true, text: messageText, time });
+      renderMessages(conversations[currentChatId]);
+    } else {
+      // If it's a Firestore chat, send to Firestore
+      try {
+        await db.collection('chats').doc(currentChatId).collection('messages').add({
+          senderId: currentUser.uid,
+          senderName: currentUser.displayName || 'Usuario',
+          text: messageText,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await db.collection('chats').doc(currentChatId).update({
+          lastMessage: {
+            text: messageText,
+            time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+            senderId: currentUser.uid
+          }
+        });
+      } catch (error) {
+        console.error("Error al enviar ubicación:", error);
+        alert('No se pudo enviar la ubicación.');
+      }
+    }
   });
 
 
   // Al seleccionar archivo/imagen, simula un mensaje en el chat
-  fileImage?.addEventListener('change', (e) => {
-    if (!e.target.files?.length || !currentChatId) return;
+  fileImage?.addEventListener('change', async (e) => { // Make async
+    if (!e.target.files?.length || !currentChatId || !currentUser) return;
     const f = e.target.files[0];
-    const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    conversations[currentChatId] = conversations[currentChatId] || [];
-    conversations[currentChatId].push({ me:true, text:`📷 Imagen: ${f.name}`, time });
-    renderMessages(conversations[currentChatId]);
+    const messageText = `📷 Imagen: ${f.name}`;
+
+    if (conversations[currentChatId]) {
+      const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+      conversations[currentChatId].push({ me:true, text: messageText, time });
+      renderMessages(conversations[currentChatId]);
+    } else {
+      try {
+        await db.collection('chats').doc(currentChatId).collection('messages').add({
+          senderId: currentUser.uid,
+          senderName: currentUser.displayName || 'Usuario',
+          text: messageText,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await db.collection('chats').doc(currentChatId).update({
+          lastMessage: {
+            text: messageText,
+            time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+            senderId: currentUser.uid
+          }
+        });
+      } catch (error) {
+        console.error("Error al enviar imagen:", error);
+        alert('No se pudo enviar la imagen.');
+      }
+    }
     e.target.value = '';
   });
 
-  fileAny?.addEventListener('change', (e) => {
-    if (!e.target.files?.length || !currentChatId) return;
+  fileAny?.addEventListener('change', async (e) => { // Make async
+    if (!e.target.files?.length || !currentChatId || !currentUser) return;
     const f = e.target.files[0];
-    const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    conversations[currentChatId] = conversations[currentChatId] || [];
-    conversations[currentChatId].push({ me:true, text:`📎 Archivo: ${f.name}`, time });
-    renderMessages(conversations[currentChatId]);
+    const messageText = `📎 Archivo: ${f.name}`;
+
+    if (conversations[currentChatId]) {
+      const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+      conversations[currentChatId].push({ me:true, text: messageText, time });
+      renderMessages(conversations[currentChatId]);
+    } else {
+      try {
+        await db.collection('chats').doc(currentChatId).collection('messages').add({
+          senderId: currentUser.uid,
+          senderName: currentUser.displayName || 'Usuario',
+          text: messageText,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await db.collection('chats').doc(currentChatId).update({
+          lastMessage: {
+            text: messageText,
+            time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+            senderId: currentUser.uid
+          }
+        });
+      } catch (error) {
+        console.error("Error al enviar archivo:", error);
+        alert('No se pudo enviar el archivo.');
+      }
+    }
     e.target.value = '';
   });
 
@@ -595,20 +759,57 @@ document.addEventListener('DOMContentLoaded', () => {
   /* =========================
      Lógica “Agregar a alguien”
   ========================== */
-  addForm?.addEventListener('submit', (e) => {
+  addForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const val = addInput.value.trim();
-    if (!val) return;
-    addedMembers.push(val);
-    addInput.value = '';
-    renderAdded();
-    openConfirm('Se envió invitación para unirse al chat.', () => {});
+    const email = addInput.value.trim().toLowerCase();
+    if (!email || !currentChatId || currentChatType !== 'group') return;
+
+    const addButton = addForm.querySelector('button[type="submit"]');
+    addButton.disabled = true;
+    addButton.textContent = '...';
+
+    try {
+      // 1. Buscar al usuario por su correo en la colección 'users'
+      const userQuery = await db.collection('users').where('email', '==', email).limit(1).get();
+
+      if (userQuery.empty) {
+        alert(`No se encontró ningún usuario con el correo: ${email}`);
+        return;
+      }
+
+      const userToAdd = userQuery.docs[0].data();
+      const uidToAdd = userToAdd.uid;
+
+      // 2. Actualizar el documento del chat para añadir el UID al array 'Members'
+      const chatRef = db.collection('chats').doc(currentChatId);
+      await chatRef.update({
+        Members: firebase.firestore.FieldValue.arrayUnion(uidToAdd)
+      });
+
+      // 3. (Opcional) Añadir un mensaje del sistema al chat
+      await chatRef.collection('messages').add({
+        senderId: 'system',
+        senderName: 'Sistema',
+        text: `${currentUser.displayName} agregó a ${userToAdd.displayName} al grupo.`,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      addInput.value = '';
+      openConfirm(`${userToAdd.displayName} fue agregado al grupo.`, () => {});
+
+    } catch (error) {
+      console.error("Error al agregar miembro:", error);
+      alert('Ocurrió un error al intentar agregar al miembro.');
+    } finally {
+      addButton.disabled = false;
+      addButton.textContent = 'Agregar';
+    }
   });
 
   /* =========================
      Lógica de "Enviar Correo"
   ========================== */
-  emailForm?.addEventListener('submit', (e) => {
+  emailForm?.addEventListener('submit', async (e) => { // Make async
     e.preventDefault();
     const email = document.getElementById('emailInput').value;
     const desc = emailDesc.value.trim();
@@ -617,14 +818,35 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('Por favor, escribe una descripción.');
       return;
     }
+    if (!currentChatId || !currentUser) return;
 
     // Simular envío
     const message = `📧 Correo enviado a ${email}: "${desc}"`;
-    const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-    conversations[currentChatId] = conversations[currentChatId] || [];
-    conversations[currentChatId].push({ me:true, text: message, time });
-    renderMessages(conversations[currentChatId]);
 
+    if (conversations[currentChatId]) {
+      const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+      conversations[currentChatId].push({ me:true, text: message, time });
+      renderMessages(conversations[currentChatId]);
+    } else {
+      try {
+        await db.collection('chats').doc(currentChatId).collection('messages').add({
+          senderId: currentUser.uid,
+          senderName: currentUser.displayName || 'Usuario',
+          text: message,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await db.collection('chats').doc(currentChatId).update({
+          lastMessage: {
+            text: message,
+            time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+            senderId: currentUser.uid
+          }
+        });
+      } catch (error) {
+        console.error("Error al enviar correo:", error);
+        alert('No se pudo enviar el correo.');
+      }
+    }
     // Limpiar y cerrar
     emailDesc.value = '';
     closeSidePanel();

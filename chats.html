@@ -30,12 +30,12 @@
 
         <div class="menu card glass" id="userDropdown" hidden>
           <div class="menu-header">
-            <div class="menu-name">Pepe Aguilar</div>
+            <div class="menu-name" id="menuUserName">Cargando...</div>
           </div>
 
           <div class="menu-row">
             <img class="gem-icon" src="assets/img/gema.png" alt="Gemas" />
-            <span class="gem-count">324</span>
+            <span class="gem-count" id="menuUserGems">--</span>
           </div>
 
           <button class="menu-item" id="btnEncrypt">Cifrar chats</button>
@@ -60,31 +60,7 @@
         <button class="tab">Grupos</button>
       </div>
 
-      <nav class="chatlist">
-        <a class="chatitem" href="#" data-chat="ana" data-name="Ana Martínez" data-type="private">
-          <div class="avatar online">A</div>
-          <div class="meta">
-            <div class="row1"><span class="name">Ana Martínez</span><time>10:12 p.m.</time></div>
-            <div class="row2"><span class="preview">¿Listo para mañana?</span><span class="badge">2</span></div>
-          </div>
-        </a>
-
-        <a class="chatitem" href="#" data-chat="grupo" data-name="GPO FCFM" data-type="group">
-          <div class="avatar grp">👥</div>
-          <div class="meta">
-            <div class="row1"><span class="name">GPO FCFM</span><time>9:45 p.m.</time></div>
-            <div class="row2"><span class="preview">Tú: Nos juntamos hoy o que?</span></div>
-          </div>
-        </a>
-
-        <a class="chatitem" href="#" data-chat="diego" data-name="Diego" data-type="private">
-          <div class="avatar online">D</div>
-          <div class="meta">
-            <div class="row1"><span class="name">Diego</span><time>9:10 p.m.</time></div>
-            <div class="row2"><span class="preview">Bro, el parley está listo</span></div>
-          </div>
-        </a>
-      </nav>
+      <nav class="chatlist" id="chatListContainer"></nav>
     </aside>
 
        <section class="panel">
@@ -225,6 +201,15 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  
+  <!-- SDK de Firebase (versión 8) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+  <!-- Tu configuración de Firebase -->
+  <script src="js/firebase-config.js"></script>
+
   <script src="js/chats.js"></script>
 </body>
 </html>

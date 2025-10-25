@@ -67,9 +67,33 @@
     </div>
   </main>
 
+  <!-- SDK de Firebase (versión 8) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+  <!-- Tu configuración de Firebase -->
+  <script src="js/firebase-config.js"></script>
+
     <script>
-    // Estado local de miembros
-    const members = new Set();
+    let currentUser = null; // Variable para almacenar el usuario actual
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // Redirigir si no hay usuario autenticado
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        currentUser = user;
+        console.log('Usuario autenticado:', currentUser.displayName);
+      } else {
+        console.log('Usuario no autenticado, redirigiendo a login...');
+        window.location.href = 'login.html';
+      }
+    });
+
+    // Estado local de miembros.
+    // Guardará objetos { uid, displayName } para los usuarios encontrados.
+    const members = new Map(); // Usamos un Map para evitar duplicados por UID.
 
     // Selectores
     const groupForm    = document.getElementById('groupForm');
@@ -81,12 +105,12 @@
     // Render chips
     function renderChips(){
       membersChips.innerHTML = '';
-      [...members].forEach(m => {
+      members.forEach((user, uid) => {
         const chip = document.createElement('span');
         chip.className = 'chip';
-        chip.innerHTML = `${m} <button type="button" aria-label="Quitar">&times;</button>`;
+        chip.innerHTML = `${user.displayName} <button type="button" aria-label="Quitar">&times;</button>`;
         chip.querySelector('button').addEventListener('click', () => {
-          members.delete(m);
+          members.delete(uid);
           renderChips();
         });
         membersChips.appendChild(chip);
@@ -94,15 +118,47 @@
     }
 
     // Agregar miembro (evita duplicados/espacios raros)
-    function addMember(){
-      const raw = (memberInput.value || '').trim();
-      if (!raw) return;
-      const val = raw.replace(/\s+/g,' ');
-      if (members.has(val)) { memberInput.value=''; memberInput.focus(); return; }
-      members.add(val);
-      memberInput.value = '';
-      renderChips();
-      memberInput.focus();
+    async function addMember(){
+      const email = (memberInput.value || '').trim().toLowerCase();
+      if (!email) return;
+
+      // Evitar agregarse a uno mismo
+      if (email === currentUser.email) {
+        alert('No necesitas agregarte a ti mismo, ya eres parte del grupo.');
+        memberInput.value = '';
+        return;
+      }
+
+      addMemberBtn.disabled = true;
+      addMemberBtn.textContent = '...';
+
+      try {
+        // Buscar en la colección 'users' por el campo 'email'
+        const querySnapshot = await db.collection('users').where('email', '==', email).limit(1).get();
+
+        if (querySnapshot.empty) {
+          alert(`No se encontró ningún usuario con el correo: ${email}`);
+        } else {
+          const userDoc = querySnapshot.docs[0];
+          const userData = userDoc.data();
+
+          if (members.has(userData.uid)) {
+            alert(`${userData.displayName} ya está en la lista.`);
+          } else {
+            // Guardar el UID y el nombre para mostrarlo en el chip
+            members.set(userData.uid, { uid: userData.uid, displayName: userData.displayName });
+            renderChips();
+          }
+        }
+      } catch (error) {
+        console.error("Error al buscar usuario:", error);
+        alert('Ocurrió un error al buscar el miembro.');
+      } finally {
+        memberInput.value = '';
+        memberInput.focus();
+        addMemberBtn.disabled = false;
+        addMemberBtn.textContent = 'Agregar';
+      }
     }
 
     addMemberBtn.addEventListener('click', addMember);
@@ -111,36 +167,64 @@
     });
 
     // Crear grupo
-    groupForm.addEventListener('submit', e => {
+    groupForm.addEventListener('submit', async e => {
       e.preventDefault();
+      if (!currentUser) {
+        alert('Debes iniciar sesión para crear un grupo.');
+        return;
+      }
+
       const name = (groupName.value || '').trim();
-      if (!name){ groupName.focus(); return; }
+      if (!name){
+        groupName.focus();
+        alert('Por favor, ingresa un nombre para el grupo.');
+        return;
+      }
 
-      // Objeto grupo
-      const newGroup = {
-        id: 'g_' + Date.now(),
-        name,
-        members: [...members],
-      };
+      const submitButton = groupForm.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      submitButton.textContent = 'Creando...';
 
-      // Guardar en localStorage para que chats.js lo pinte
-      const groups = JSON.parse(localStorage.getItem('created_groups') || '[]');
-      groups.push(newGroup);
-      localStorage.setItem('created_groups', JSON.stringify(groups));
+      try {
+        // Incluir al creador en la lista de miembros
+        const memberUids = [...members.keys()]; // Obtener los UIDs del Map
+        memberUids.push(currentUser.uid); // Añadir el UID del creador
 
-      // Conversación inicial (mensaje del sistema)
-      const convs = JSON.parse(localStorage.getItem('created_conversations') || '{}');
-      const now   = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-      convs[newGroup.id] = [
-        { me:false, user:"Sistema", gems:0, text:"Grupo creado ✨", time: now }
-      ];
-      localStorage.setItem('created_conversations', JSON.stringify(convs));
+        const finalMembers = [...new Set(memberUids)]; // Asegurarse de que no haya duplicados
 
-      // Indicar a chats cuál abrir al regresar
-      localStorage.setItem('open_group_id', newGroup.id);
+        // Crear el documento del grupo en Firestore
+        const newGroupRef = await db.collection('chats').add({
+          name: name,
+          type: 'group',
+          creatorId: currentUser.uid,
+          Members: finalMembers, // 'Members' con mayúscula para coincidir con chats.js
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          lastMessage: {
+            text: `${currentUser.displayName || 'Alguien'} creó el grupo.`,
+            time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+            senderId: 'system'
+          }
+        });
 
-      // Volver a la lista de chats
-      window.location.href = 'chats.html';
+        // Opcional: Añadir un mensaje inicial al grupo en una subcolección 'messages'
+        await newGroupRef.collection('messages').add({
+          senderId: 'system',
+          senderName: 'Sistema',
+          text: `${currentUser.displayName || 'Alguien'} creó el grupo. ¡Bienvenido!`,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        console.log('Grupo creado con ID:', newGroupRef.id);
+
+        // Redirigir a la página de chats
+        window.location.href = 'chats.html';
+
+      } catch (error) {
+        console.error("Error al crear el grupo:", error);
+        alert('Hubo un error al crear el grupo. Intenta de nuevo.');
+        submitButton.disabled = false;
+        submitButton.textContent = 'Crear grupo';
+      }
     });
   </script>
 </body>
