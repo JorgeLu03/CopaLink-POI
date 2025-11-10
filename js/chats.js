@@ -160,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       // --- El usuario NO está autenticado ---
       console.log('Usuario no autenticado, redirigiendo a login...');
-      window.location.href = 'login.html';
+  window.location.href = 'login.php';
     }
   });
 
@@ -406,6 +406,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const name = itemElement.dataset.name || 'Chat';
     const type = itemElement.dataset.type || 'private';
     openConversation(id, name, type);
+
+    if (isMobileView()) {
+      sidebar.style.display = 'none';
+      panel.style.display = 'block';
+    }
   }
 
   /* =========================

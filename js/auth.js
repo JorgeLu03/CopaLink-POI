@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // 4. Redirigir a la página de chats
-        window.location.href = 'chats.html';
+  window.location.href = 'chats.php';
 
       } catch (error) {
         console.error("Error en el registro:", error);
@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await auth.signInWithEmailAndPassword(email, password);
         
         // 2. Redirigir a la página de chats
-        window.location.href = 'chats.html';
+  window.location.href = 'chats.php';
 
       } catch (error) {
         console.error("Error en el inicio de sesión:", error);
